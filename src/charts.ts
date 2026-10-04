@@ -69,10 +69,10 @@ function splitBar(x: number, y: number, w: number, h: number, yes: number, no: n
     </g>`;
 }
 
-/** Straight segments through time-ordered points, extended flat to `tEnd`. */
+/** Odds hold until a bet moves them: flat runs with a step at each point, extended to `tEnd`. */
 function linePath(pts: { t: number; yes: number }[], x: (t: number) => number, y: (p: number) => number, tEnd: number) {
-  const d = pts.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.yes).toFixed(1)}`).join(" ");
-  return `${d} L${x(tEnd).toFixed(1)},${y(pts[pts.length - 1]!.yes).toFixed(1)}`;
+  const d = pts.map((p, i) => (i ? `H${x(p.t).toFixed(1)} V${y(p.yes).toFixed(1)}` : `M${x(p.t).toFixed(1)},${y(p.yes).toFixed(1)}`)).join(" ");
+  return `${d} H${x(tEnd).toFixed(1)}`;
 }
 
 const clock = (ms: number) => new Date(ms).toLocaleString("en-US", { hour: "numeric", minute: "2-digit" });
@@ -158,7 +158,7 @@ export function marketCard(m: Market, external?: { name: string; yes: number | n
   const button = (x: number, label: string, price: number, payout: number | null, fill: string, tint: string) =>
     `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="18" fill="${tint}"/>` +
     t(x + 32, y + 58, `${label} ${Math.round(price * 100)}%`, 34, fill, 700) +
-    t(x + bw - 32, y + 56, p.total ? `pays ${mult(payout)}` : "", 26, fill, 500, "end");
+    t(x + bw - 32, y + 56, p.total && m.status === "open" ? `pays ${mult(payout)}` : "", 26, fill, 500, "end");
   parts.push(button(PAD, "Yes", yesP, pay.yes, C.yes, C.yesTint), button(PAD + bw + 24, "No", 1 - yesP, pay.no, C.no, C.noTint));
   y += bh + 64;
 
@@ -185,7 +185,7 @@ export function marketCard(m: Market, external?: { name: string; yes: number | n
   const n = new Set(people.map((s) => s.user_id)).size;
   parts.push(`<line x1="${PAD}" y1="${y - 30}" x2="${W - PAD}" y2="${y - 30}" stroke="${C.line}" stroke-width="2"/>`);
   parts.push(t(PAD, y + 10, `${money(p.total)} pot · ${n} ${n === 1 ? "person" : "people"}`, 24, C.muted, 500));
-  parts.push(t(W - PAD, y + 10, `!yes ${m.id} · !no ${m.id}`, 24, C.faint, 500, "end"));
+  if (m.status === "open") parts.push(t(W - PAD, y + 10, `!yes ${m.id} · !no ${m.id}`, 24, C.faint, 500, "end"));
   y += 10 + PAD - 10;
 
   return render(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}">${parts.join("")}</svg>`);
