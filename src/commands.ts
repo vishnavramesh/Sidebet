@@ -75,7 +75,7 @@ export const isCommand = (text: string) => PREFIXES.some((p) => text.trimStart()
 /** What a bare "!yes" bets. */
 export const DEFAULT_BET_CENTS = Math.round(Number(process.env.DEFAULT_BET ?? (PLAY ? 100 : 5)) * 100);
 
-const HELP = `Group Markets · ${PLAY ? "play money, 1,000 coins each to start" : "real money, settled between you"}
+const HELP = `Sidebet · ${PLAY ? "play money, 1,000 coins each to start" : "real money, settled between you"}
 
 !new <question>      open a market (odds from chat history + Kalshi)
 !yes 1 ${HINT} · !no 1 ${HINT} bet ${usd(HINT * 100)} on #1${PLAY ? "" : ` (max ${usd(MAX_BET_CENTS)})`}

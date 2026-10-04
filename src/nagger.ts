@@ -25,7 +25,7 @@ const days = (d: Debt) => Math.max(1, Math.ceil((Date.now() - d.created_at) / (2
 export function howToPay(d: Debt, m: Market): string {
   const who = displayName(d.space_id, d.creditor);
   const p = getProfile(d.creditor);
-  const note = encodeURIComponent(`Group Markets #${m.id}`);
+  const note = encodeURIComponent(`Sidebet #${m.id}`);
   const lines = [`Apple Cash: open your chat with ${who}, tap +, then Apple Cash, then ${usd(d.amount)}.`];
   if (p.venmo) lines.push(`Venmo: https://venmo.com/${p.venmo}?txn=pay&amount=${plainAmount(d.amount)}&note=${note}`);
   if (p.cashapp) lines.push(`Cash App: https://cash.app/$${p.cashapp}/${plainAmount(d.amount)}`);

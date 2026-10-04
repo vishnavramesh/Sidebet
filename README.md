@@ -1,4 +1,6 @@
-# 🎲 Group Markets
+# 🎲 Sidebet
+
+*Kalshi for your group chat.*
 
 A prediction-market bot for iMessage group chats, built on [Spectrum](https://photon.codes/docs/spectrum-ts/providers/imessage). Friends open yes/no markets on anything ("Will Jake be late?"), bet against each other with play money (or real dollars with `MONEY_MODE=real`), and get a chart of the odds and the pot. In real-money mode the bot never holds money: when a market settles it works out who pays whom, DMs the losers how to pay (Apple Cash, or one-tap Venmo / Cash App links), and keeps reminding them until the winner confirms. Public events can be **mirrored from Kalshi or Polymarket**, so the group sees real-world odds and the market **settles automatically** when the real one does.
 

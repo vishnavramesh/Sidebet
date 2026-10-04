@@ -1,8 +1,17 @@
-# Group Markets: pitch and demo notes
+# Sidebet: pitch and demo notes
+
+## Tagline
+
+**Kalshi for your group chat.**
+(alternates: *Put your money where your group chat is.* · *Every hot take is a market.*)
+
+## Elevator pitch
+
+Sidebet is an AI bookie that lives in your iMessage group chat. When a friend says "Ajay is never learning to swim," Sidebet turns it into a yes/no market, reads the chat's history to set the opening odds with receipts ("Four months of 'gonna learn,' zero pool time"), and tracks every bet on a Kalshi-style chart. Public events mirror real Kalshi odds and settle automatically, and when someone posts evidence, Sidebet calls out whose bet just got better or worse.
 
 ## One line
 
-Friends already argue about who'll be late, whether the camping trip happens, and who wins Sunday. Group Markets turns those arguments into prediction markets inside the iMessage group chat, with odds set from the chat's own history and real-world bets mirrored live from Kalshi.
+Friends already argue about who'll be late, whether the camping trip happens, and who wins Sunday. Sidebet turns those arguments into prediction markets inside the iMessage group chat, with odds set from the chat's own history and real-world bets mirrored live from Kalshi.
 
 ## Lead with the hook, not the command list
 
@@ -53,7 +62,7 @@ Bot:   Opening odds 15%. Planned for August, stalled without a date, and the sem
 
 Prabhath's blendit is a group trip planner: an Expo / React Native app on Supabase. Friends paste TikToks and Reels into a trip and vote each clip up or down. A worker downloads the video, samples frames, and has Claude pull out every real place shown; clips the group voted up become the itinerary.
 
-| | Group Markets | blendit |
+| | Sidebet | blendit |
 |---|---|---|
 | Problem | Settling group arguments and predictions | Agreeing on what to do on a group trip |
 | Where it lives | Inside an existing iMessage group | Standalone mobile app (sign-up, invites by email) |
@@ -66,6 +75,6 @@ Prabhath's blendit is a group trip planner: an Expo / React Native app on Supaba
 
 **Where blendit is stronger:** a polished, designed mobile UI; real multi-user auth and permissions; a robust job queue; a harder AI task (video understanding).
 
-**Where Group Markets is stronger:** zero onboarding, a live "wow" moment in a chat, real-world data that settles itself, and AI output the group can argue with.
+**Where Sidebet is stronger:** zero onboarding, a live "wow" moment in a chat, real-world data that settles itself, and AI output the group can argue with.
 
 **They fit together.** Both turn messy group opinions into a decision. A natural bridge is markets on blendit trips ("Will we actually book Miami?" or "Will Ajay make the 7am hike?"), opened from the trip's group chat with the itinerary as context for the odds.

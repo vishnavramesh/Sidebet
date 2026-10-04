@@ -196,7 +196,7 @@ if (!discover) {
   startNagger({ dm: sendDm, announce: (spaceId, text) => deliver(spaceId, { text }) });
 }
 console.log(
-  `🎲 group-markets running · bet detection ${detectionEnabled ? "on" : "off"} · ` +
+  `🎲 sidebet running · bet detection ${detectionEnabled ? "on" : "off"} · ` +
     (discover ? "DISCOVER mode (read-only)" : allowed.size ? `chats: ${[...allowed].join(", ")}` : "ALL chats"),
 );
 
