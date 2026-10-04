@@ -1,0 +1,183 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+:root { --bg:#0C0F0E; --surface:#141816; --ink:#F1F4F2; --muted:#9AA39E; --faint:#252B28; --yes:#2DD47C; --no:#FF6B6F;
+  --bubble-in:#26252A; --bubble-out:#0B84FE; --display:"Bricolage Grotesque",system-ui,sans-serif; --body:"Geist",system-ui,sans-serif;
+  --mono:"Geist Mono",ui-monospace,monospace; --imsg:-apple-system,"SF Pro Text","Helvetica Neue",sans-serif; }
+* { box-sizing:border-box; margin:0; }
+html, body { width:1920px; height:1080px; overflow:hidden; background:var(--bg); color:var(--ink); font-family:var(--body); }
+.layer { position:absolute; inset:0; opacity:0; }
+/* Title + outro */
+.center { display:grid; place-content:center; justify-items:center; gap:28px; text-align:center; }
+.logo { width:180px; height:180px; border-radius:40px; }
+.word { font:800 120px var(--display); letter-spacing:-0.04em; line-height:1; }
+.word b { color:var(--yes); }
+.tag { font:500 48px var(--display); color:var(--muted); letter-spacing:-0.02em; }
+.tag em { font-style:normal; color:var(--ink); }
+.fine { font:400 26px var(--body); color:var(--muted); max-width:1100px; line-height:1.45; }
+.chips { display:flex; gap:16px; flex-wrap:wrap; justify-content:center; max-width:1300px; }
+.chips span { font:500 26px var(--body); border:1px solid var(--faint); border-radius:99px; padding:10px 22px; color:var(--ink); }
+/* Scenes */
+.scene { display:grid; grid-template-columns:1fr 600px; gap:90px; align-items:center; padding:0 150px 0 170px; }
+.cap { display:grid; gap:26px; align-content:center; }
+.cap .num { font:500 26px var(--mono); color:var(--yes); letter-spacing:.06em; text-transform:uppercase; }
+.cap h2 { font:800 92px var(--display); letter-spacing:-0.035em; line-height:1; }
+.cap p { font:400 36px/1.4 var(--body); color:var(--muted); max-width:840px; }
+.dots { display:flex; gap:12px; }
+.dots i { width:46px; height:6px; border-radius:6px; background:var(--faint); }
+.dots i.on { background:var(--yes); }
+.phone { width:560px; height:1000px; background:#2A2E2C; border-radius:66px; padding:14px; }
+.screen { background:#000; border-radius:54px; height:100%; display:grid; grid-template-rows:auto 1fr; overflow:hidden; }
+.head { display:grid; justify-items:center; gap:6px; padding:22px 12px 14px; border-bottom:1px solid var(--faint); }
+.avatars { display:flex; }
+.avatars span { width:40px; height:40px; border-radius:50%; display:grid; place-items:center; font:600 16px var(--imsg); color:#fff; margin-left:-10px; border:2px solid #000; }
+.avatars span:first-child { margin-left:0; }
+.head b { font:600 18px var(--imsg); }
+.viewport { overflow:hidden; position:relative; }
+.log { position:absolute; left:0; right:0; top:0; padding:14px 16px 26px; display:flex; flex-direction:column; gap:4px; }
+.msg { display:grid; gap:3px; max-width:86%; justify-items:start; }
+.bubble { width:fit-content; max-width:100%; }
+.msg.out { align-self:flex-end; justify-items:end; }
+.who { font:500 14px var(--imsg); color:var(--muted); padding-left:14px; margin-top:10px; }
+.bubble { font:20px/1.3 var(--imsg); padding:10px 15px; border-radius:22px; background:var(--bubble-in); white-space:pre-wrap; overflow-wrap:anywhere; }
+.msg.out .bubble { background:var(--bubble-out); color:#fff; }
+.msg.card .bubble { font-size:16.5px; line-height:1.36; }
+.msg.img { max-width:94%; }
+.msg.img img { width:100%; border-radius:18px; display:block; }
+.typing .bubble { display:flex; gap:6px; padding:15px 17px; }
+.typing i { width:9px; height:9px; border-radius:50%; background:var(--muted); }
+/* Charts */
+.charts { display:grid; align-content:center; gap:40px; padding:0 150px; }
+.charts h2 { font:800 72px var(--display); letter-spacing:-0.03em; text-align:center; }
+.charts .row { display:grid; grid-template-columns:1fr 1fr; gap:60px; }
+.charts img { width:100%; border-radius:26px; }
+</style></head>
+<body>
+<section class="layer center" id="title">
+  <img class="logo" src="__LOGO__" alt="" style="width:300px;height:300px;border-radius:66px">
+  <div class="tag" style="font-size:64px"><em>Kalshi</em> for your group chat.</div>
+</section>
+
+<section class="layer center" id="intro">
+  <div class="word" style="font-size:84px;max-width:1500px;line-height:1.08">Your group chat already argues about everything.</div>
+  <div class="fine" style="font-size:34px">Sidebet is an AI bookie that turns those arguments into yes/no markets, sets the odds from the chat's own history, and keeps score.</div>
+</section>
+
+<section class="layer scene" id="scene">
+  <div class="cap"><span class="num" id="num"></span><h2 id="sh"></h2><p id="sp"></p><div class="dots" id="dots"></div></div>
+  <div class="phone"><div class="screen">
+    <div class="head"><div class="avatars"><span style="background:#7C8CF8">M</span><span style="background:#F59E0B">S</span><span style="background:#10B981">T</span><span style="background:#EC4899">L</span></div><b>roomies 4L</b></div>
+    <div class="viewport"><div class="log" id="log"></div></div>
+  </div></div>
+</section>
+
+<section class="layer charts" id="charts">
+  <h2>Every bet re-posts a chart the group can read at a glance.</h2>
+  <div class="row"><img src="__C71__" alt=""><img src="__C64__" alt=""></div>
+</section>
+
+<section class="layer center" id="outro">
+  <img class="logo" src="__LOGO__" alt="" style="width:220px;height:220px;border-radius:48px">
+  <div class="tag" style="font-size:56px"><em>Kalshi</em> for your group chat.</div>
+  <div class="chips"><span>Odds with receipts from your chat</span><span>Live Kalshi-style charts</span><span>Reacts to real evidence</span><span>Mirrors Kalshi, settles itself</span><span>Who-paid-who at the end</span></div>
+  <div class="fine" style="font-size:22px">Real Sidebet output from our group chats. Names changed. Built at MHacks 2026 with Claude, Photon Spectrum and Kalshi.</div>
+</section>
+
+<script type="application/json" id="scenes">__SCENES__</script>
+<script>
+const SCENES = JSON.parse(document.getElementById("scenes").textContent);
+const ME = "Vish", BOT = "Sidebet";
+const TITLES = ["Open a market", "Place bets", "It's watching", "Settle up"];
+// Timeline (seconds). Each chat message gets an appear time; bot messages type first.
+const TITLE = 3.6, INTRO = 4.6, CHARTS = 5.5, OUTRO = 6, FADE = 0.45;
+const timeline = [];
+let t = 0;
+const add = (id, dur, extra = {}) => { timeline.push({ id, start: t, end: t + dur, ...extra }); t += dur; };
+add("title", TITLE);
+add("intro", INTRO);
+SCENES.forEach((s, i) => {
+  let at = 1.2; // caption reads first
+  const msgs = s.msgs.map((m, j) => {
+    const bot = m.from === BOT;
+    const prev = s.msgs[j - 1];
+    if (bot) at += 1.0;            // typing
+    else at += 0.9;                // someone types
+    const e = { ...m, appear: at, typingFrom: bot ? at - 1.0 : null, sameAsPrev: prev && prev.from === m.from };
+    at += m.img ? 2.6 : m.card ? 2.4 : 0.9; // time to read it
+    return e;
+  });
+  add("scene", at + 1.6, { scene: i, msgs });
+});
+add("charts", CHARTS);
+add("outro", OUTRO);
+window.DURATION = t;
+
+const layers = Object.fromEntries(["title", "intro", "scene", "charts", "outro"].map((id) => [id, document.getElementById(id)]));
+const log = document.getElementById("log");
+let builtScene = -1, scroll = 0, els = [], typingEl = null;
+const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+
+function buildScene(seg) {
+  builtScene = seg.scene; scroll = 0; log.replaceChildren(); els = [];
+  const s = SCENES[seg.scene];
+  document.getElementById("num").textContent = `Step ${seg.scene + 1} of ${SCENES.length}`;
+  document.getElementById("sh").textContent = TITLES[seg.scene] ?? s.label;
+  document.getElementById("sp").textContent = s.note;
+  document.getElementById("dots").innerHTML = SCENES.map((_, i) => `<i class="${i === seg.scene ? "on" : ""}"></i>`).join("");
+  for (const m of seg.msgs) {
+    const el = document.createElement("div");
+    const out = m.from === ME;
+    el.className = "msg" + (out ? " out" : "") + (m.card ? " card" : "") + (m.img ? " img" : "");
+    if (!out && !m.sameAsPrev) { const w = document.createElement("span"); w.className = "who"; w.textContent = m.from; el.append(w); }
+    if (m.img) { const im = document.createElement("img"); im.src = m.img; el.append(im); }
+    else { const b = document.createElement("div"); b.className = "bubble"; b.textContent = m.text; el.append(b); }
+    el.style.display = "none";
+    log.append(el); els.push([m, el]);
+  }
+  typingEl = document.createElement("div");
+  typingEl.className = "msg typing";
+  typingEl.innerHTML = '<span class="who">Sidebet</span><div class="bubble"><i></i><i></i><i></i></div>';
+  typingEl.style.display = "none";
+  log.append(typingEl);
+}
+
+window.renderAt = function (now) {
+  for (const seg of timeline) {
+    const layer = layers[seg.id];
+    const on = now >= seg.start && now < seg.end;
+    if (seg.id === "scene") { if (on) { /* handled below */ } else continue; }
+    if (seg.id !== "scene") layer.style.opacity = on ? String(Math.min(ease((now - seg.start) / FADE), ease((seg.end - now) / FADE))) : (layer.dataset.keep ? layer.style.opacity : "0");
+  }
+  const seg = timeline.find((s) => now >= s.start && now < s.end);
+  const sceneLayer = layers.scene;
+  if (!seg || seg.id !== "scene") { sceneLayer.style.opacity = "0"; return; }
+  if (builtScene !== seg.scene) buildScene(seg);
+  const local = now - seg.start;
+  sceneLayer.style.opacity = String(Math.min(ease(local / FADE), ease((seg.end - now) / FADE)));
+  let typing = null;
+  for (const [m, el] of els) {
+    const shown = local >= m.appear;
+    el.style.display = shown ? "" : "none";
+    if (shown) {
+      const p = ease((local - m.appear) / 0.3);
+      el.style.opacity = String(p);
+      el.style.transform = `translateY(${(1 - p) * 10}px)`;
+    }
+    if (m.typingFrom != null && local >= m.typingFrom && local < m.appear) typing = m;
+  }
+  typingEl.style.display = typing ? "" : "none";
+  if (typing) {
+    typingEl.querySelector(".who").style.display = typing.sameAsPrev ? "none" : "";
+    const dots = typingEl.querySelectorAll("i");
+    dots.forEach((d, i) => { d.style.opacity = String(0.35 + 0.65 * Math.max(0, Math.sin((local * 6) - i * 0.9))); });
+  }
+  const vp = log.parentElement;
+  const target = Math.max(0, log.scrollHeight - vp.clientHeight);
+  scroll += (target - scroll) * 0.18;
+  if (Math.abs(target - scroll) < 0.5) scroll = target;
+  log.style.transform = `translateY(${-scroll}px)`;
+};
+window.ready = document.fonts.ready.then(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))));
+</script>
+</body></html>

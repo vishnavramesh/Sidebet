@@ -1,0 +1,295 @@
+<title>Sidebet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a two-column hero (pitch left, phone replaying the real chat right), then real charts, then how it works. Kalshi-clean: white, ink, one green, one red. */
+:root {
+  --bg: #F7F9F8;
+  --surface: #FFFFFF;
+  --ink: #0B0D10;
+  --muted: #5E6670;
+  --faint: #E4E8E6;
+  --yes: #00A76F;
+  --yes-tint: #E6F6EF;
+  --no: #E5484D;
+  --bubble-in: #E9E9EB;
+  --bubble-in-ink: #0B0D10;
+  --bubble-out: #0B84FE;
+  --phone: #0B0D10;
+  --chat-bg: #FFFFFF;
+  --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --body: "Geist", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --imsg: -apple-system, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0C0F0E; --surface: #141816; --ink: #F1F4F2; --muted: #9AA39E; --faint: #252B28;
+    --yes: #2DD47C; --yes-tint: #12271D; --no: #FF6B6F;
+    --bubble-in: #26252A; --bubble-in-ink: #F1F4F2; --phone: #2A2E2C; --chat-bg: #000000;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0C0F0E; --surface: #141816; --ink: #F1F4F2; --muted: #9AA39E; --faint: #252B28;
+  --yes: #2DD47C; --yes-tint: #12271D; --no: #FF6B6F;
+  --bubble-in: #26252A; --bubble-in-ink: #F1F4F2; --phone: #2A2E2C; --chat-bg: #000000;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body); }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 64px; display: grid; gap: 88px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.02em; }
+p { margin: 0; }
+code, .mono { font-family: var(--mono); font-size: 0.92em; }
+
+/* Hero */
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 56px; align-items: start; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand img { width: 44px; height: 44px; border-radius: 11px; }
+.brand span { font: 800 22px var(--display); letter-spacing: -0.03em; }
+.brand b { color: var(--yes); font-weight: 800; }
+.pitch { display: grid; gap: 24px; padding-top: 24px; min-width: 0; }
+.tagline { font-size: clamp(40px, 6vw, 68px); line-height: 1.02; font-weight: 800; }
+.tagline em { font-style: normal; color: var(--yes); }
+.lede { font-size: 18px; color: var(--muted); max-width: 54ch; }
+.lede strong { color: var(--ink); font-weight: 600; }
+.receipt { background: var(--surface); border: 1px solid var(--faint); border-radius: 14px; padding: 18px 20px; display: grid; gap: 10px; max-width: 520px; }
+.receipt .q { font: 600 15px var(--body); }
+.odds { display: flex; align-items: baseline; gap: 10px; }
+.odds .pct { font: 800 40px var(--display); letter-spacing: -0.03em; }
+.odds .lbl { color: var(--muted); }
+.meter { height: 8px; border-radius: 99px; background: color-mix(in srgb, var(--no) 22%, transparent); overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--yes); border-radius: 99px; }
+.reasons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; font-size: 13.5px; color: var(--muted); }
+.reasons div { min-width: 0; }
+.reasons .y::before { content: "+ "; color: var(--yes); font-weight: 600; }
+.reasons .n::before { content: "− "; color: var(--no); font-weight: 600; }
+.cmds { display: flex; flex-wrap: wrap; gap: 8px; }
+.cmds code { background: var(--surface); border: 1px solid var(--faint); border-radius: 8px; padding: 4px 9px; }
+
+/* Phone */
+.stage { display: grid; gap: 14px; justify-items: center; }
+.phone { width: 100%; max-width: 380px; background: var(--phone); border-radius: 46px; padding: 12px; box-shadow: 0 30px 60px -30px rgb(0 0 0 / 0.45); }
+.screen { background: var(--chat-bg); border-radius: 36px; height: 640px; display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
+.chat-head { display: grid; justify-items: center; gap: 4px; padding: 14px 12px 10px; border-bottom: 1px solid var(--faint); }
+.avatars { display: flex; }
+.avatars span { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font: 600 12px var(--imsg); color: #fff; margin-left: -8px; border: 2px solid var(--chat-bg); }
+.avatars span:first-child { margin-left: 0; }
+.chat-head b { font: 600 13px var(--imsg); color: var(--ink); }
+.log { overflow-y: auto; padding: 12px 12px 18px; display: flex; flex-direction: column; gap: 3px; scroll-behavior: smooth; }
+.msg { display: grid; gap: 2px; max-width: 82%; animation: pop .28s ease-out both; }
+.msg.out { align-self: flex-end; justify-items: end; }
+.msg .who { font: 500 11px var(--imsg); color: var(--muted); padding-left: 12px; margin-top: 8px; }
+.bubble { font: 15px/1.32 var(--imsg); padding: 8px 12px; border-radius: 18px; background: var(--bubble-in); color: var(--bubble-in-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.out .bubble { background: var(--bubble-out); color: #fff; }
+.msg.card .bubble { font-size: 13.5px; line-height: 1.38; }
+.msg.img { max-width: 88%; }
+.msg.img img { border-radius: 16px; border: 1px solid var(--faint); display: block; }
+.typing .bubble { display: flex; gap: 4px; padding: 12px 14px; }
+.typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); opacity: .5; animation: dot 1s infinite; }
+.typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes dot { 50% { opacity: 1; transform: translateY(-2px); } }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.tabs button { font: 500 13px var(--body); color: var(--muted); background: transparent; border: 1px solid var(--faint); border-radius: 99px; padding: 6px 12px; cursor: pointer; }
+.tabs button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+.tabs button:focus-visible, .replay:focus-visible { outline: 2px solid var(--yes); outline-offset: 2px; }
+.scene-note { font-size: 14px; color: var(--muted); text-align: center; max-width: 36ch; min-height: 3em; }
+.replay { font: 500 13px var(--body); color: var(--yes); background: none; border: 0; cursor: pointer; }
+
+/* Sections */
+section { display: grid; gap: 28px; }
+.eyebrow { font: 500 12px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--yes); }
+h2 { font-size: clamp(28px, 4vw, 40px); }
+.sub { color: var(--muted); max-width: 62ch; }
+.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+figure { margin: 0; display: grid; gap: 10px; }
+figure img { width: 100%; border-radius: 18px; border: 1px solid var(--faint); background: #fff; }
+figcaption { font-size: 14px; color: var(--muted); }
+figcaption b { color: var(--ink); font-weight: 600; }
+.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; counter-reset: step; }
+.step { border-top: 2px solid var(--ink); padding-top: 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.step::before { counter-increment: step; content: counter(step, decimal-leading-zero); font: 500 12px var(--mono); color: var(--muted); }
+.step h3 { font-size: 20px; }
+.step p { font-size: 14.5px; color: var(--muted); }
+.stack { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 14px; color: var(--muted); }
+.stack b { color: var(--ink); font-weight: 600; }
+footer { border-top: 1px solid var(--faint); padding-top: 20px; font-size: 13px; color: var(--muted); display: grid; gap: 6px; }
+
+@media (max-width: 900px) {
+  .hero { grid-template-columns: minmax(0, 1fr); }
+  .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .charts, .steps, .reasons { grid-template-columns: minmax(0, 1fr); }
+  .screen { height: 560px; }
+  .wrap { gap: 64px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg, .typing i { animation: none; }
+  .log { scroll-behavior: auto; }
+}
+</style>
+
+<main class="wrap">
+  <div class="hero">
+    <div class="pitch">
+      <div class="brand"><img src="logo.png" alt=""><span>side<b>bet</b></span></div>
+      <h1 class="tagline">Kalshi for your <em>group chat</em>.</h1>
+      <p class="lede">Sidebet is an AI bookie that lives in your iMessage group chat. It turns trash talk into yes/no markets, <strong>sets the odds by reading your chat's history</strong>, and tracks every bet on a live chart. Public events mirror real Kalshi odds and settle on their own.</p>
+      <div class="receipt" aria-label="Example market">
+        <div class="q">Will our apartment have ants tomorrow?</div>
+        <div class="odds"><span class="pct">72%</span><span class="lbl">chance · odds set from 1,343 messages of chat history</span></div>
+        <div class="meter" role="img" aria-label="72% yes"><i style="width:72%"></i></div>
+        <div class="reasons">
+          <div class="y">Bathroom ants unresolved since Aug 26</div>
+          <div class="n">No ant talk since late August</div>
+          <div class="y">Leo left the stove on (Oct 1)</div>
+          <div class="n">October cold slows ants down</div>
+        </div>
+      </div>
+      <div class="cmds" aria-label="Commands"><code>!new &lt;question&gt;</code><code>!yes 71 50</code><code>!no 71 50</code><code>!resolve 71 yes</code></div>
+    </div>
+
+    <div class="stage">
+      <div class="phone">
+        <div class="screen">
+          <div class="chat-head">
+            <div class="avatars" aria-hidden="true"><span style="background:#7C8CF8">M</span><span style="background:#F59E0B">S</span><span style="background:#10B981">T</span><span style="background:#EC4899">L</span></div>
+            <b>roomies 4L</b>
+          </div>
+          <div class="log" id="log" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="tabs" id="tabs" role="group" aria-label="Demo scenes"></div>
+      <p class="scene-note" id="note"></p>
+      <button class="replay" id="replay" type="button">Replay scene</button>
+    </div>
+  </div>
+
+  <section aria-labelledby="charts-h">
+    <span class="eyebrow">Real output</span>
+    <h2 id="charts-h">Every market gets a chart the group can read at a glance.</h2>
+    <p class="sub">Each bet re-posts a card with the odds over time, what each side pays, and who's on which side. These are rendered by the bot from our own group chats.</p>
+    <div class="charts">
+      <figure><img src="chart-71.png" alt="Market 71, will Sam climb a V5 before graduating: 68% chance, Sam 120 on YES, Marcus 50 and Theo 40 on NO" loading="lazy"><figcaption><b>#71 · open.</b> Opened at 80% because the chat calls Sam "climbing master shifu". Two friends faded it.</figcaption></figure>
+      <figure><img src="chart-64.png" alt="Market 64, does Leo have the most aura, resolved Yes: Leo 50 on YES, Vish 50 on NO" loading="lazy"><figcaption><b>#64 · resolved.</b> Sidebet said 20%. Leo bet on himself and then resolved it himself, which is why fair resolution is next.</figcaption></figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="how-h">
+    <span class="eyebrow">How it works</span>
+    <h2 id="how-h">From a hot take to a payout in four messages.</h2>
+    <div class="steps">
+      <div class="step"><h3>Scan</h3><p>Sidebet reads the group's history once and writes a compact dossier and a profile for each person. Markets read ~11K tokens instead of ~115K.</p></div>
+      <div class="step"><h3>Open</h3><p>Someone types <code>!new</code>, or Sidebet spots a bold claim. Claude sets the opening odds and cites the chat for each side.</p></div>
+      <div class="step"><h3>Bet</h3><p>Friends bet with <code>!yes</code> and <code>!no</code>. Odds blend the AI's prior with the money, and Sidebet reacts when someone posts real evidence.</p></div>
+      <div class="step"><h3>Settle</h3><p>The creator resolves it, or Kalshi does for public events. Winners split the pot, and Sidebet posts who paid who.</p></div>
+    </div>
+    <div class="stack"><span><b>iMessage</b> Photon Spectrum</span><span><b>AI</b> Claude Opus 5.5</span><span><b>Markets</b> Kalshi · Polymarket</span><span><b>Data</b> SQLite</span><span><b>Charts</b> SVG → PNG</span></div>
+  </section>
+
+  <footer>
+    <span>Everything in the chat replay and charts is real Sidebet output from our group chats: the odds, the reasons, the cards and the reactions. Friends' names are changed. The bets on #71 were placed for this demo; #64 played out exactly as shown.</span>
+    <span>Built at MHacks 2026.</span>
+  </footer>
+</main>
+
+<script type="application/json" id="scenes">__SCENES__</script>
+<script>
+(() => {
+  const scenes = JSON.parse(document.getElementById("scenes").textContent);
+  const log = document.getElementById("log");
+  const tabs = document.getElementById("tabs");
+  const note = document.getElementById("note");
+  const ME = "Vish", BOT = "Sidebet";
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let run = 0, current = 0;
+
+  const bubble = (m, last) => {
+    const el = document.createElement("div");
+    const out = m.from === ME;
+    el.className = "msg" + (out ? " out" : "") + (m.card ? " card" : "") + (m.img ? " img" : "");
+    if (!out && (!last || last.from !== m.from)) {
+      const who = document.createElement("span");
+      who.className = "who";
+      who.textContent = m.from;
+      el.append(who);
+    }
+    if (m.img) {
+      const img = document.createElement("img");
+      img.src = m.img; img.alt = m.alt || "";
+      img.addEventListener("load", () => { log.scrollTop = log.scrollHeight; });
+      el.append(img);
+    } else {
+      const b = document.createElement("div");
+      b.className = "bubble";
+      b.textContent = m.text;
+      el.append(b);
+    }
+    return el;
+  };
+  const typing = () => {
+    const el = document.createElement("div");
+    el.className = "msg typing";
+    el.innerHTML = '<span class="who">Sidebet</span><div class="bubble"><i></i><i></i><i></i></div>';
+    return el;
+  };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  function showAll(i) {
+    log.replaceChildren();
+    let last = null;
+    for (const m of scenes[i].msgs) { log.append(bubble(m, last)); last = m; }
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function play(i, auto) {
+    const id = ++run;
+    current = i;
+    [...tabs.children].forEach((b, j) => b.setAttribute("aria-pressed", String(j === i)));
+    note.textContent = scenes[i].note;
+    if (reduce) { showAll(i); return; }
+    log.replaceChildren();
+    let last = null;
+    for (const m of scenes[i].msgs) {
+      if (id !== run) return;
+      if (m.from === BOT) {
+        const t = typing();
+        if (last && last.from === BOT) t.querySelector(".who").remove();
+        log.append(t); log.scrollTop = log.scrollHeight;
+        await wait(m.card || m.img ? 900 : 600);
+        if (id !== run) return;
+        t.remove();
+      } else {
+        await wait(700);
+        if (id !== run) return;
+      }
+      log.append(bubble(m, last)); last = m;
+      log.scrollTop = log.scrollHeight;
+      await wait(m.card ? 1500 : 650);
+    }
+    if (auto && id === run) {
+      await wait(2600);
+      if (id === run) play((i + 1) % scenes.length, true);
+    }
+  }
+
+  scenes.forEach((s, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = s.label;
+    b.addEventListener("click", () => play(i, false));
+    tabs.append(b);
+  });
+  document.getElementById("replay").addEventListener("click", () => play(current, false));
+
+  // Complete at rest: the first scene is fully visible before the replay starts.
+  showAll(0);
+  [...tabs.children].forEach((b, j) => b.setAttribute("aria-pressed", String(j === 0)));
+  note.textContent = scenes[0].note;
+  if (!reduce) setTimeout(() => { if (run === 0) play(0, true); }, 2500);
+})();
+</script>
