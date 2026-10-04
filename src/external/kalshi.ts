@@ -60,9 +60,16 @@ export const kalshi: ExternalSource = {
       `${BASE}/v1/search/series?query=${encodeURIComponent(query)}&page_size=${limit}`,
     );
     const out: ExternalMarket[] = [];
+    const terms = query.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
+    const hits = (m: SearchResp["current_page"][number]["markets"][number]) => {
+      const text = `${m.yes_subtitle ?? ""} ${m.title}`.toLowerCase();
+      return terms.filter((w) => text.includes(w)).length;
+    };
     for (const ev of data.current_page ?? []) {
-      // Multi-outcome events have many markets; surface the most relevant few.
-      for (const m of ev.markets.slice(0, 2)) {
+      // Multi-outcome events (e.g. 32 Super Bowl teams) have many markets;
+      // surface the outcomes the query names, else the first couple.
+      const ranked = ev.markets.map((m, i) => ({ m, i, h: hits(m) })).sort((a, b) => b.h - a.h || a.i - b.i);
+      for (const { m } of ranked.slice(0, 2)) {
         const sub = m.yes_subtitle && ev.markets.length > 1 ? ` (${m.yes_subtitle})` : "";
         out.push({
           ref: `kalshi:${m.ticker}`,
@@ -95,3 +102,34 @@ export const kalshi: ExternalSource = {
     }
   },
 };
+
+interface ListResp {
+  markets: { ticker: string; yes_sub_title?: string; close_time: string; yes_bid_dollars?: string; yes_ask_dollars?: string }[];
+}
+
+/**
+ * For live demos: the hourly crypto market closing soonest (but not too soon)
+ * whose odds are closest to a coin flip, phrased as a plain question.
+ */
+export async function soonestCoinFlip(asset: "btc" | "eth", minMinutes = 10, maxMinutes = 180) {
+  const series = asset === "eth" ? "KXETHD" : "KXBTCD";
+  const name = asset === "eth" ? "Ethereum" : "Bitcoin";
+  const now = Math.floor(Date.now() / 1000);
+  const { markets } = await getJson<ListResp>(
+    `${BASE}/trade-api/v2/markets?series_ticker=${series}&status=open&min_close_ts=${now + minMinutes * 60}&max_close_ts=${now + maxMinutes * 60}&limit=500`,
+  );
+  const priced = markets
+    .map((m) => ({ m, p: mid(m.yes_bid_dollars, m.yes_ask_dollars) }))
+    .filter((x): x is { m: (typeof markets)[number]; p: number } => x.p != null);
+  if (!priced.length) return null;
+  const firstClose = priced.map((x) => x.m.close_time).sort()[0];
+  const best = priced.filter((x) => x.m.close_time === firstClose).sort((a, b) => Math.abs(a.p - 0.5) - Math.abs(b.p - 0.5))[0]!;
+  const closesAt = new Date(best.m.close_time);
+  const when = closesAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return {
+    ref: `kalshi:${best.m.ticker}`,
+    question: `Will ${name} be ${best.m.yes_sub_title ?? "above the line"} at ${when}?`,
+    yesPrice: best.p,
+    closesAt: closesAt.getTime(),
+  };
+}

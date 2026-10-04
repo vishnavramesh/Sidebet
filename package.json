@@ -9,9 +9,10 @@
     "dev": "tsx watch src/index.ts",
     "terminal": "tsx --env-file-if-exists=.env src/index.ts --terminal",
     "typecheck": "tsc",
-    "smoke": "DB_PATH=:memory: tsx scripts/smoke.ts",
+    "smoke": "DB_PATH=:memory: MONEY_MODE=real tsx scripts/smoke.ts && DB_PATH=:memory: MONEY_MODE=play tsx scripts/smoke-play.ts",
     "discover": "tsx --env-file-if-exists=.env src/index.ts --discover",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "scan": "tsx --env-file-if-exists=.env scripts/scan.ts"
   },
   "keywords": [],
   "author": "",
@@ -19,6 +20,8 @@
   "type": "module",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
+    "@photon-ai/imessage-kit": "^3.0.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@spectrum-ts/imessage-local": "^12.10.1",
     "spectrum-ts": "^12.10.1",
     "zod": "^4.6.5"
