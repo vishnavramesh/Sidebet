@@ -13,7 +13,7 @@ import { describeWhen } from "./when.ts";
 //   will harish stay up 30 more mins?        (bold)
 //   #51 · 50 pot · 1 in
 //
-//   YES 64%  ↑9  ·  NO 36%
+//   YES 64%  ↑9  ·  NO 36%                  (↑9: what the last bet did)
 //   ▰▰▰▰▰▰▱▱▱▱  64% chance
 //   ▁▁▂▃▅█  since open
 //
@@ -51,16 +51,18 @@ function sparkline(m: Market): string | null {
   return `${last.map((v) => SPARKS[step(v)]).join("")}  since open`;
 }
 
-/** What `cents` on `side` would pay back right now if it wins. */
+/** What `cents` on `side` would pay back right now if it wins (whole coins in play money, like the wallets). */
 function wouldPay(m: Market, side: Side, cents: number) {
   const p = pools(m.id);
-  return Math.floor((cents / (p[side] + cents)) * (p.total + cents));
+  const back = Math.floor((cents / (p[side] + cents)) * (p.total + cents));
+  return PLAY ? Math.floor(back / 100) * 100 : back;
 }
 
-/** "YES 64%  ↑9  ·  NO 36%" with the move since open. */
+/** "YES 64%  ↑9  ·  NO 36%" with the latest move (what the last bet just did). */
 function oddsHeadline(m: Market) {
   const yes = impliedYes(m);
-  const moved = m.prior == null ? 0 : Math.round((yes - m.prior) * 100);
+  const pts = oddsHistory(m);
+  const moved = pts.length < 2 ? 0 : Math.round((pts.at(-1)!.yes - pts.at(-2)!.yes) * 100);
   const arrow = moved ? `  ${moved > 0 ? "↑" : "↓"}${Math.abs(moved)}` : "";
   return `${bold(`YES ${pct(yes)}`)}${arrow}  ·  NO ${pct(1 - yes)}`;
 }
