@@ -22,10 +22,11 @@ const FONTS: Record<string, Font> = {
   double: { upper: 0x1d538, lower: 0x1d552, digit: 0x1d7d8, holes: { C: "ℂ", H: "ℍ", N: "ℕ", P: "ℙ", Q: "ℚ", R: "ℝ", Z: "ℤ" } },
   mono: { upper: 0x1d670, lower: 0x1d68a, digit: 0x1d7f6 }, // 𝙰𝚊𝟶
   sans: { upper: 0x1d5a0, lower: 0x1d5ba, digit: 0x1d7e2 }, // 𝖠𝖺𝟢
-  bold: { upper: 0x1d5d4, lower: 0x1d5ee, digit: 0x1d7ec }, // 𝗔𝗮𝟬
+  bold: { upper: 0x1d5d4, lower: 0x1d5ee, digit: 0x1d7ec }, // 𝗔𝗮𝟬, closest to iMessage's own SF Pro, bolded
 };
 
-const choice = process.env.BOT_FONT ?? "smallcaps";
+// Regular iMessage text by default; BOT_FONT=bold (or double, mono, sans, smallcaps) restyles every bot message.
+const choice = process.env.BOT_FONT ?? "off";
 const smallCaps = choice === "smallcaps";
 const font = choice === "off" || smallCaps ? null : (FONTS[choice] ?? FONTS.double!);
 
@@ -42,6 +43,20 @@ function convert(s: string): string {
     else out += ch;
   }
   return out;
+}
+
+/** Bold for a headline inside an otherwise plain message (iMessage has no real bold). */
+export function bold(text: string): string {
+  const f = FONTS.bold!;
+  return [...text]
+    .map((ch) => {
+      const c = ch.codePointAt(0)!;
+      if (c >= 65 && c <= 90) return String.fromCodePoint(f.upper + c - 65);
+      if (c >= 97 && c <= 122) return String.fromCodePoint(f.lower + c - 97);
+      if (c >= 48 && c <= 57) return String.fromCodePoint(f.digit + c - 48);
+      return ch;
+    })
+    .join("");
 }
 
 /** Restyle a bot message, leaving URLs untouched. */

@@ -1,5 +1,6 @@
 import { marketCard } from "./charts.ts";
-import { oddsLine, type Reply } from "./commands.ts";
+import { showCard } from "./card.ts";
+import type { Reply } from "./commands.ts";
 import type { Market } from "./db.ts";
 import { parseRef } from "./external/index.ts";
 import { extHistory, getMarketById, recordExtPrice, setExtPosted } from "./markets.ts";
@@ -25,7 +26,7 @@ export function scheduleChart(m: Market, deliver: Deliver) {
       const fresh = getMarketById(m.id);
       if (!fresh || fresh.status === "cancelled") return;
       const ext = extNameAndPrice(fresh);
-      void deliver(fresh.space_id, { text: `#${fresh.id} live · ${oddsLine(fresh)}`, image: safeCard(fresh, ext), marketId: fresh.id }).catch((err) =>
+      void deliver(fresh.space_id, { text: showCard(fresh, `📈 Live · #${fresh.id}`), image: safeCard(fresh, ext) }).catch((err) =>
         console.warn("[live] chart", err),
       );
     }, CHART_DELAY_MS),
@@ -63,8 +64,7 @@ export async function onExternalPrice(m: Market, yes: number, deliver: Deliver) 
   const from = Math.round(m.ext_posted_yes * 100);
   setExtPosted(m, yes);
   await deliver(m.space_id, {
-    text: `${name} moved on #${m.id}: ${from}% → ${Math.round(yes * 100)}%\n${oddsLine(m)}`,
-    marketId: m.id,
+    text: showCard(m, `📡 ${name} moved #${m.id}: ${from}% → ${Math.round(yes * 100)}%`),
     image: safeCard(m, { name, yes }),
   });
 }

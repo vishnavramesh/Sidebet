@@ -36,9 +36,14 @@ export function recordMessage(spaceId: string, row: HistoryRow) {
   insert.run(row.guid, spaceId, row.sender, row.text, row.ts);
 }
 
-/** Pull a chat's full history from Messages into the local table. */
-export async function importChat(spaceId: string, name: string | null, onPage?: (n: number) => void) {
-  const rows = await readChatHistory(spaceId, onPage);
+/**
+ * Pull a chat's full history from this Mac user's Messages into the local
+ * table, filed under `spaceId`. `sourceId` is the chat's id in this user's
+ * Messages when it differs, e.g. scanning from the owner's account for a bot
+ * account that sees the same group under another id.
+ */
+export async function importChat(spaceId: string, name: string | null, onPage?: (n: number) => void, sourceId = spaceId) {
+  const rows = await readChatHistory(sourceId, onPage);
   db.exec("BEGIN");
   for (const r of rows) recordMessage(spaceId, r);
   db.exec("COMMIT");
@@ -46,6 +51,16 @@ export async function importChat(spaceId: string, name: string | null, onPage?: 
     "INSERT INTO scanned_chats (space_id, name, scanned_at) VALUES (?, ?, ?) ON CONFLICT(space_id) DO UPDATE SET name = excluded.name, scanned_at = excluded.scanned_at",
   ).run(spaceId, name, Date.now());
   return rows;
+}
+
+// The dossier Claude writes from a full read of the chat at scan time. Markets
+// read this (a few thousand tokens) instead of the raw history (~85K).
+if (!(db.prepare("PRAGMA table_info(scanned_chats)").all() as { name: string }[]).some((c) => c.name === "digest")) {
+  db.exec("ALTER TABLE scanned_chats ADD COLUMN digest TEXT");
+}
+
+export function setDigest(spaceId: string, digest: string) {
+  db.prepare("UPDATE scanned_chats SET digest = ? WHERE space_id = ?").run(digest, spaceId);
 }
 
 export function setLore(spaceId: string, lore: string) {
@@ -146,18 +161,117 @@ export function transcript(maxChars = 600_000, before = lastScanAt(), only?: str
  * Messages that arrived after the last scan. Kept out of `transcript()` so the
  * big scanned block stays byte-identical and Claude can serve it from cache.
  */
-export function recentTail(spaceId: string, since = lastScanAt(), limit = 200): string {
+export function recentTail(spaceId: string, since = lastScanAt(), limit = 400): string {
   const rows = db
     .prepare("SELECT sender, text, ts FROM history WHERE space_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?")
     .all(spaceId, since, limit) as { sender: string; text: string; ts: number }[];
   return rows
     .reverse()
-    .map((r) => `[${new Date(r.ts).toISOString().slice(0, 16).replace("T", " ")}] ${who(r.sender)}: ${r.text}`)
+    .map((r) => `[${localStamp(r.ts)}] ${who(r.sender)}: ${r.text}`)
     .join("\n");
 }
+
+/** "Sun Oct 4, 4:49 AM" in this Mac's time zone (not UTC), so Claude reads times the way the chat lives them. */
+export const localStamp = (ts: number) =>
+  new Date(ts).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 function lastScanAt(): number {
   const row = db.prepare("SELECT MAX(scanned_at) AS t FROM scanned_chats").get() as { t: number | null };
   return row.t ?? Date.now();
 }
 
+
+// ---------- personality profiles ----------
+// One cached profile per person PER CHAT, built only from that chat. The same
+// person in two group chats has two separate profiles, and nothing one chat
+// says about someone is ever shown or used in another. Rebuilt only once they
+// have sent PROFILE_REFRESH more messages in that chat.
+
+db.exec(`
+  DROP TABLE IF EXISTS person_profiles; -- old cross-chat profiles; they mixed chats
+  CREATE TABLE IF NOT EXISTS chat_profiles (
+    space_id TEXT NOT NULL,
+    handle TEXT NOT NULL,    -- phone/email, or "me" for the Mac's owner
+    name TEXT NOT NULL,
+    data TEXT NOT NULL,      -- JSON, see PersonProfile in oracle.ts
+    msg_count INTEGER NOT NULL,
+    built_at INTEGER NOT NULL,
+    PRIMARY KEY (space_id, handle)
+  );
+`);
+
+export const PROFILE_REFRESH = Number(process.env.PROFILE_REFRESH ?? 100);
+export const PROFILE_MIN_MESSAGES = Number(process.env.PROFILE_MIN_MESSAGES ?? 10);
+
+/** Everyone who has talked in this chat, with how many messages they sent here. */
+export function chatPeople(spaceId: string, minMessages = PROFILE_MIN_MESSAGES) {
+  return db
+    .prepare(
+      `SELECT sender AS handle, COUNT(*) AS n FROM history
+       WHERE space_id = ? AND sender != 'unknown'
+       GROUP BY sender HAVING n >= ? ORDER BY n DESC`,
+    )
+    .all(spaceId, minMessages) as { handle: string; n: number }[];
+}
+
+export const personName = (handle: string) => who(handle);
+
+/** What a profile is built from: their messages in this chat, and what this chat says about them. */
+export function personEvidence(spaceId: string, handle: string, maxOwn = 900, maxMentions = 250): string {
+  const name = who(handle).split(" ")[0]!;
+  const fmt = (r: { sender: string; text: string; ts: number }) => `[${new Date(r.ts).toDateString().slice(4, 10)}] ${who(r.sender)}: ${r.text}`;
+  const own = (
+    db
+      .prepare("SELECT sender, text, ts FROM history WHERE space_id = ? AND sender = ? ORDER BY ts DESC LIMIT ?")
+      .all(spaceId, handle, maxOwn) as { sender: string; text: string; ts: number }[]
+  ).reverse();
+  const mentions =
+    name.length >= 3
+      ? (
+          db
+            .prepare("SELECT sender, text, ts FROM history WHERE space_id = ? AND sender != ? AND text LIKE ? ORDER BY ts DESC LIMIT ?")
+            .all(spaceId, handle, `%${name}%`, maxMentions) as { sender: string; text: string; ts: number }[]
+        ).reverse()
+      : [];
+  return `MESSAGES ${who(handle)} SENT IN THIS CHAT:\n${own.map(fmt).join("\n")}\n\nWHAT OTHERS IN THIS CHAT SAID ABOUT ${name.toUpperCase()}:\n${mentions.map(fmt).join("\n") || "(nothing)"}`;
+}
+
+export function saveProfile(spaceId: string, handle: string, name: string, data: unknown, msgCount: number) {
+  db.prepare(
+    `INSERT INTO chat_profiles (space_id, handle, name, data, msg_count, built_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(space_id, handle) DO UPDATE SET name = excluded.name, data = excluded.data, msg_count = excluded.msg_count, built_at = excluded.built_at`,
+  ).run(spaceId, handle, name, JSON.stringify(data), msgCount, Date.now());
+}
+
+/** This chat's profiles only. */
+export function storedProfiles(spaceId: string) {
+  return db
+    .prepare("SELECT handle, name, data, msg_count FROM chat_profiles WHERE space_id = ? ORDER BY msg_count DESC")
+    .all(spaceId) as { handle: string; name: string; data: string; msg_count: number }[];
+}
+
+/** People in this chat whose profile is missing or has PROFILE_REFRESH+ new messages. */
+export function staleProfiles(spaceId: string) {
+  const built = new Map(storedProfiles(spaceId).map((p) => [p.handle, p.msg_count]));
+  return chatPeople(spaceId).filter((p) => !built.has(p.handle) || p.n - built.get(p.handle)! >= PROFILE_REFRESH);
+}
+
+/** A profile in this chat by a name someone typed ("nishant", "Paul Lee", "me"). */
+export function findProfile(spaceId: string, query: string) {
+  const q = query.trim().toLowerCase();
+  return storedProfiles(spaceId).find((p) => {
+    const n = p.name.toLowerCase();
+    return n === q || n.split(" ")[0] === q || (q.length >= 3 && n.includes(q));
+  });
+}
+
+/** One chat's dossier, or its raw transcript if it has no dossier yet. Never another chat's. */
+export function chatDigest(spaceId: string): string {
+  const c = db.prepare("SELECT space_id, name, digest FROM scanned_chats WHERE space_id = ?").get(spaceId) as
+    | { space_id: string; name: string | null; digest: string | null }
+    | undefined;
+  if (!c) return "";
+  return c.digest
+    ? `=== Dossier: this group chat "${c.name ?? c.space_id}" (from a full read of its history) ===\n${c.digest}`
+    : transcript(200_000, undefined, c.space_id);
+}

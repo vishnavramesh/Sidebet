@@ -15,7 +15,7 @@ export function startCloser(deliver: Deliver, intervalMs = 30_000) {
     for (const m of closingSoon(LAST_CALL_MS, now)) {
       markWarned(m);
       const mins = Math.max(1, Math.round((m.closes_at! - now) / 60_000));
-      await deliver(m.space_id, { text: `Last call: #${m.id} closes in ${mins} min.\n${m.question}`, marketId: m.id });
+      await deliver(m.space_id, { text: `Last call: #${m.id} closes in ${mins} min.\n${m.question}` });
     }
     for (const m of pastCloseTime(now)) {
       closeMarket(m);
@@ -23,13 +23,12 @@ export function startCloser(deliver: Deliver, intervalMs = 30_000) {
       const next = m.external
         ? "It settles automatically when the real market does."
         : `${displayName(m.space_id, m.creator)}, resolve it with !resolve ${m.id} yes|no`;
-      await deliver(m.space_id, { text: `#${m.id} is closed. No more bets.\n${next}`, marketId: m.id });
+      await deliver(m.space_id, { text: `#${m.id} is closed. No more bets.\n${next}` });
     }
     for (const m of awaitingResolution(REMIND_EVERY_MS, now)) {
       markReminded(m, now);
       await deliver(m.space_id, {
         text: `Reminder: #${m.id} is closed but not resolved.\n${displayName(m.space_id, m.creator)}, settle it with !resolve ${m.id} yes|no`,
-        marketId: m.id,
       });
     }
   };

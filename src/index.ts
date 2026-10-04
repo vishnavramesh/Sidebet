@@ -1,17 +1,19 @@
 import { execFileSync } from "node:child_process";
+import { existsSync, unlinkSync } from "node:fs";
 import { attachment, type Message, Spectrum, type Space } from "spectrum-ts";
 import { lookupSender } from "./chatdb.ts";
-import { handleCommand, isCommand, type Reply, suggestions, TAPBACK_CENTS } from "./commands.ts";
-import { detectBet, detectionEnabled } from "./detect.ts";
+import { handleCommand, isCommand, type Reply, suggestions } from "./commands.ts";
+import { detectionEnabled, observe } from "./detect.ts";
 import { sources } from "./external/index.ts";
 import { recordMessage } from "./history.ts";
 import { scheduleChart } from "./live.ts";
 import { keepCacheWarm } from "./oracle.ts";
-import { isKnownUser, linkMarketMessage, marketForMessage } from "./markets.ts";
+import { isKnownUser } from "./markets.ts";
 import { startNagger } from "./nagger.ts";
 import { startCloser } from "./closer.ts";
 import { startResolver } from "./resolver.ts";
-import { botVoice, plainText } from "./voice.ts";
+import { startWeb } from "./web.ts";
+import { bold, botVoice, plainText } from "./voice.ts";
 
 /**
  * Provider selection:
@@ -24,12 +26,11 @@ import { botVoice, plainText } from "./voice.ts";
  * plus a way to open a 1:1 chat for payment reminders.
  */
 type OwnMessage = { chatId: string; guid: string; text: string; ts: number };
-type Tapback = { chatId: string; guid: string; sender: string; kind: string; target: string; removed: boolean };
 type App = {
   messages: AsyncIterable<[Space, Message]>;
   openDm: (userId: string) => Promise<Space | undefined>;
-  /** Local mode only: the owner's own messages and everyone's tapbacks, in these chats. */
-  watchLocal?: (chatIds: string[], onOwn: (m: OwnMessage) => void, onTapback: (t: Tapback) => void) => Promise<void>;
+  /** Local mode only: the owner's own messages in these chats. */
+  watchLocal?: (chatIds: string[], onOwn: (m: OwnMessage) => void) => Promise<void>;
   getSpace?: (id: string) => Promise<Space>;
 };
 
@@ -55,11 +56,11 @@ async function createApp(): Promise<App> {
     openDm: (u) => localIMessage(app).space.create(u),
     getSpace: (id) => localIMessage(app).space.get(id),
     // Spectrum only streams other people's text messages, so poll chat.db for
-    // the two things it drops: the owner's own messages and tapbacks. Polling
+    // what it drops: the owner's own messages (when texting as the owner). Polling
     // (not imessage-kit's watcher) because a row often lands before its text or
     // sender does, and the watcher looks at each row only once. The callers
     // de-duplicate by message id and skip rows that aren't complete yet.
-    watchLocal: async (chatIds, onOwn, onTapback) => {
+    watchLocal: async (chatIds, onOwn) => {
       const { IMessageSDK } = await import("@photon-ai/imessage-kit");
       const sdk = new IMessageSDK();
       const since = new Date();
@@ -67,12 +68,7 @@ async function createApp(): Promise<App> {
         for (const chatId of chatIds) {
           const rows = await sdk.getMessages({ chatId, since, limit: 40 }).catch(() => []);
           for (const m of rows) {
-            const r = m.reaction;
-            if (r) {
-              const sender = m.isFromMe ? OWNER : m.participant;
-              const target = r.targetMessageId?.replace(/^(?:b?p:\d+\/)/, "");
-              if (sender && target) onTapback({ chatId, guid: m.id, sender, kind: r.kind, target, removed: r.isRemoved });
-            } else if (m.isFromMe && m.text) {
+            if (!m.reaction && m.isFromMe && m.text) {
               onOwn({ chatId, guid: m.id, text: m.text, ts: m.createdAt.getTime() });
             }
           }
@@ -108,7 +104,12 @@ async function send(space: Space, content: string | ReturnType<typeof attachment
 }
 
 async function sendDm(userId: string, text: string) {
-  if (userId === OWNER) return console.log(`[dm → owner, skipped] ${text}`); // can't DM yourself
+  // (reassigned below when DMing the owner from a dedicated bot account)
+  if (userId === OWNER) {
+    // Texting as the owner, the bot can't DM them; as its own account it can.
+    if (!DEDICATED || !ownerHandles[0]) return console.log(`[dm → owner, skipped] ${text}`);
+    userId = (process.env.OWNER_HANDLES ?? "").split(",")[0]!.trim().replace(/^tel:/, "");
+  }
   const space = await app.openDm(userId).catch((err) => {
     console.warn(`[dm] can't open chat with ${userId}`, err);
     return undefined;
@@ -125,15 +126,7 @@ const remember = (text: string) => {
   if (sentByBot.size > 200) sentByBot.delete(sentByBot.values().next().value!);
 };
 
-// Bot texts about a market, so the poller can tie the chat.db row (and any
-// tapbacks on it) back to that market once it shows up.
-const marketTexts = new Map<string, number>();
-
 async function sendTo(space: Space, reply: Reply) {
-  if (reply.marketId) {
-    marketTexts.set(botVoice(reply.text).trim(), reply.marketId);
-    if (marketTexts.size > 200) marketTexts.delete(marketTexts.keys().next().value!);
-  }
   await send(space, reply.text);
   if (reply.image) {
     await send(space, attachment(reply.image, { name: "market.png", mimeType: "image/png" }))
@@ -159,12 +152,47 @@ const isDmSpace = (id: string) => id.includes(";-;");
 /** The bot owner's user id: their own messages carry no sender handle. */
 const OWNER = "me";
 
+// BOT_ACCOUNT=dedicated: this Mac user's Messages is signed into the bot's own
+// Apple ID. Then "from me" means the bot itself, and the owner is a normal
+// member whose phone/email (OWNER_HANDLES) map back to "me", so their wallet,
+// profiles and history carry over from when the bot texted as them.
+const DEDICATED = process.env.BOT_ACCOUNT === "dedicated";
+const normHandle = (h: string) => {
+  const s = h.trim().replace(/^tel:/, "").toLowerCase();
+  return s.includes("@") ? s : s.replace(/\D/g, "").slice(-10);
+};
+const ownerHandles = (process.env.OWNER_HANDLES ?? "").split(",").map(normHandle).filter(Boolean);
+const asUser = (handle: string) => (ownerHandles.includes(normHandle(handle)) ? OWNER : handle);
+
+// LOG_UNKNOWN_CHATS=on: note (once) every chat that isn't allowed yet, by id and
+// name only, so a new bot account's chat ids can be found without --discover.
+const loggedChats = new Set<string>();
+async function noteUnknownChat(space: Space) {
+  if (process.env.LOG_UNKNOWN_CHATS !== "on" || loggedChats.has(space.id)) return;
+  loggedChats.add(space.id);
+  const name = await space.getDisplayName().catch(() => undefined);
+  console.log(`[chat] not allowed yet: ${space.id} name=${JSON.stringify(name ?? "")}`);
+}
+
+// RESTART_FILE: touching this file makes the bot exit cleanly; launchd (or
+// whatever started it) brings it back up with the new .env and code.
+if (process.env.RESTART_FILE) {
+  setInterval(() => {
+    if (existsSync(process.env.RESTART_FILE!)) {
+      unlinkSync(process.env.RESTART_FILE!);
+      console.log("[restart] requested");
+      process.exit(0);
+    }
+  }, 2000).unref();
+}
+
 if (!discover) {
   // Load the scanned history into Claude's cache now, so the first market is fast.
   const firstChat = [...allowed][0];
   if (firstChat) keepCacheWarm(firstChat);
   startResolver(deliver);
   startCloser(deliver);
+  startWeb();
   startNagger({ dm: sendDm, announce: (spaceId, text) => deliver(spaceId, { text }) });
 }
 console.log(
@@ -192,32 +220,34 @@ async function onGroupText(space: Space, userId: string, rawText: string, guid: 
       if (reply?.betOn) scheduleChart(reply.betOn, deliver);
       return;
     }
-    if (userId === OWNER) return; // don't run bet detection on the owner's own chatter
+    // Texting as the owner, the owner's chatter is mixed up with the bot's own; skip it.
+    if (userId === OWNER && !DEDICATED) return;
 
-    const hit = await detectBet(space.id, text);
+    const seen = await observe(space.id, userId, text);
+    if (seen?.reaction) await sendTo(space, seen.reaction);
+    const hit = seen?.suggestion;
     if (!hit) return;
 
     let line = "";
     if (hit.search_query) {
       const [top] = await sources[0]!.search(hit.search_query, 1).catch(() => []);
       if (top && !top.resolved) {
-        line = `\nKalshi: YES ${Math.round((top.yesPrice ?? 0) * 100)}% (!mirror ${top.ref})`;
+        line = `\n\n📡 Kalshi has it at ${Math.round((top.yesPrice ?? 0) * 100)}%\n!mirror ${top.ref}`;
       }
     }
     suggestions.set(space.id, { question: hit.question });
-    const suggestion = `Possible market: "${hit.question}"\nReply !new to open it.${line}`;
+    const suggestion = `👀 Sounds like a bet\n━━━━━━━━━━━━━━\n${bold(hit.question)}\n\nReply !new to open it.${line}`;
     await send(space, suggestion);
   } catch (err) {
     console.error("[loop]", err);
   }
 }
 
-// The owner's own messages (same handling as anyone's) and tapback bets.
+// The owner's own messages, handled like anyone's. Only needed when texting as
+// the owner: on a dedicated bot account, "from me" is just the bot.
 const seenOwn = new Set<string>();
-const seenTapbacks = new Set<string>();
-const TAPBACK_SIDES: Record<string, "yes" | "no"> = { like: "yes", dislike: "no" };
 
-if (!discover && app.watchLocal && app.getSpace) {
+if (!discover && !DEDICATED && app.watchLocal && app.getSpace) {
   const spaceFor = async (id: string) => spaces.get(id) ?? (await app.getSpace!(id));
   void app
     .watchLocal(
@@ -226,29 +256,11 @@ if (!discover && app.watchLocal && app.getSpace) {
         if (seenOwn.has(m.guid) || isDmSpace(m.chatId)) return; // polled again every few seconds
         if (allowed.size > 0 && !allowed.has(m.chatId)) return;
         const text = m.text.trim();
-        if (sentByBot.has(text)) {
-          // Our own reply landing in chat.db: if it's about a market, remember its id.
-          const marketId = marketTexts.get(text);
-          if (marketId) linkMarketMessage(m.guid, marketId);
-          seenOwn.add(m.guid);
-          return;
-        }
+        // An attachment row (the bot's chart) is just a placeholder character: not something anyone said.
+        if (!text.replace(/\uFFFC/g, "").trim()) return void seenOwn.add(m.guid);
         seenOwn.add(m.guid);
+        if (sentByBot.has(text)) return; // our own reply landing in chat.db
         await onGroupText(await spaceFor(m.chatId), OWNER, text, m.guid, m.ts).catch((err) => console.error("[own]", err));
-      },
-      async (t) => {
-        if (seenTapbacks.has(t.guid)) return;
-        const side = TAPBACK_SIDES[t.kind];
-        if (!side || t.removed) return void seenTapbacks.add(t.guid); // other tapbacks are just tapbacks
-        // The bot message it targets may not be linked yet (same poll); retry next time.
-        const market = marketForMessage(t.target);
-        if (!market) return;
-        seenTapbacks.add(t.guid);
-        if (market.space_id !== t.chatId) return;
-        const space = await spaceFor(t.chatId);
-        const reply = await handleCommand({ spaceId: t.chatId, userId: t.sender, text: `!${side} ${market.id} ${TAPBACK_CENTS / 100}` });
-        if (reply) await sendTo(space, reply).catch((err) => console.error("[tapback]", err));
-        if (reply?.betOn) scheduleChart(reply.betOn, deliver);
       },
     )
     .catch((err) => console.warn("[local] can't watch chat.db", err));
@@ -266,14 +278,19 @@ for await (const [space, message] of app.messages) {
 
   // The local stream sometimes hands over a message before its sender is
   // linked. Look it up in the Messages database rather than guess.
-  const userId = message.sender?.id || (await lookupSender(message.id).catch(() => undefined));
+  const rawUser = message.sender?.id || (await lookupSender(message.id).catch(() => undefined));
+  const userId = rawUser && asUser(rawUser);
   if (!userId) {
     console.warn(`[loop] message ${message.id} in ${space.id} with no sender, skipped`);
     continue;
   }
 
   const isDm = isDmSpace(space.id);
-  if (isDm ? !isKnownUser(userId) : allowed.size > 0 && !allowed.has(space.id)) continue;
+  if (!isDm && allowed.size > 0 && !allowed.has(space.id)) {
+    await noteUnknownChat(space);
+    continue;
+  }
+  if (isDm && !isKnownUser(userId)) continue;
 
   const text = plainText(message.content.text);
   if (isDm) {

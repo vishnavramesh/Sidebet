@@ -170,6 +170,13 @@ export function latestOpenMarket(spaceId: string): Market | undefined {
     | undefined;
 }
 
+/** Manual markets this person opened that still need resolving, newest first. */
+export function unresolvedBy(spaceId: string, userId: string): Market[] {
+  return db
+    .prepare("SELECT * FROM markets WHERE space_id = ? AND creator = ? AND external IS NULL AND status IN ('open','closed') ORDER BY id DESC LIMIT 5")
+    .all(spaceId, userId) as unknown as Market[];
+}
+
 // ---------- close times ----------
 
 export function setCloseTime(m: Market, at: number) {
@@ -201,17 +208,6 @@ export function awaitingResolution(everyMs: number, now = Date.now()): Market[] 
 
 export function markReminded(m: Market, now = Date.now()) {
   db.prepare("UPDATE markets SET reminded_at = ? WHERE id = ?").run(now, m.id);
-}
-
-// ---------- tapbacks ----------
-
-export function linkMarketMessage(guid: string, marketId: number) {
-  db.prepare("INSERT OR IGNORE INTO market_msgs (guid, market_id) VALUES (?, ?)").run(guid, marketId);
-}
-
-export function marketForMessage(guid: string): Market | undefined {
-  const row = db.prepare("SELECT market_id FROM market_msgs WHERE guid = ?").get(guid) as { market_id: number } | undefined;
-  return row ? getMarketById(row.market_id) : undefined;
 }
 
 // ---------- real-market price tracking ----------
@@ -276,6 +272,17 @@ export function cancelMarket(m: Market) {
     if (PLAY) for (const b of betsFor(m.id)) addCoins(m.space_id, b.user_id, b.amount);
     db.prepare("UPDATE markets SET status = 'cancelled' WHERE id = ?").run(m.id);
   });
+}
+
+/** What each bettor would net if the market resolved `outcome` now (all zero if nobody's on that side). */
+export function projectedNets(marketId: number, outcome: Side): Map<string, number> {
+  const p = pools(marketId);
+  const nets = new Map<string, number>();
+  for (const s of stakes(marketId)) {
+    const won = p[outcome] > 0 && s.side === outcome ? Math.floor((s.amount / p[outcome]) * p.total) : p[outcome] > 0 ? 0 : s.amount;
+    nets.set(s.user_id, (nets.get(s.user_id) ?? 0) + won - s.amount);
+  }
+  return nets;
 }
 
 /**

@@ -58,6 +58,7 @@ export interface Debt {
 export const db = new DatabaseSync(process.env.DB_PATH ?? "markets.db");
 db.exec(`
   PRAGMA journal_mode = WAL;
+  PRAGMA busy_timeout = 10000; -- a scan from another account can write while the bot runs
   CREATE TABLE IF NOT EXISTS users (
     space_id TEXT NOT NULL,
     user_id TEXT NOT NULL,

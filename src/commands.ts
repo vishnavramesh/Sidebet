@@ -3,7 +3,8 @@ import type { Debt, Market, Side } from "./db.ts";
 import { DAILY_COINS, MAX_BET_CENTS, PLAY } from "./db.ts";
 import { fetchRef, parseRef, pct, sources } from "./external/index.ts";
 import { soonestCoinFlip } from "./external/kalshi.ts";
-import { estimate, findKalshiTwin, oracleEnabled } from "./oracle.ts";
+import { findProfile } from "./history.ts";
+import { estimate, findKalshiTwin, oracleEnabled, type PersonProfile } from "./oracle.ts";
 import {
   BetError,
   balance,
@@ -19,6 +20,9 @@ import {
   getMarketById,
   impliedYes,
   latestOpenMarket,
+  minimalTransfers,
+  projectedNets,
+  unresolvedBy,
   leaderboard,
   listMarkets,
   openDebtsFor,
@@ -39,6 +43,8 @@ import {
 import { parseMoney, usd } from "./money.ts";
 import { describeWhen, parseWhen } from "./when.ts";
 import { type Dm, howToPay, settlementDms } from "./nagger.ts";
+import { betReaction } from "./vibe.ts";
+import { betCard, boardText, HINT, lockedCard, newCard, resolvedCard, RULE, showCard } from "./card.ts";
 
 export interface Ctx {
   spaceId: string;
@@ -57,8 +63,6 @@ export interface Reply {
   dms?: Dm[];
   /** A bet landed on this market: the live loop re-posts its chart shortly. */
   betOn?: Market;
-  /** This message is about this market, so a 👍/👎 tapback on it places a bet. */
-  marketId?: number;
 }
 
 /** Last bot-suggested question per chat, so `!new` with no args can adopt it. */
@@ -67,22 +71,21 @@ export const suggestions = new Map<string, { question: string; external?: string
 const PREFIXES = ["!", "/"];
 export const isCommand = (text: string) => PREFIXES.some((p) => text.trimStart().startsWith(p));
 
-/** Example bet size in hints: 5 dollars or 50 coins. */
-const HINT = PLAY ? 50 : 5;
 
-export const TAPBACK_CENTS = Math.round(Number(process.env.TAPBACK_AMOUNT ?? (PLAY ? 100 : 5)) * 100);
+/** What a bare "!yes" bets. */
+export const DEFAULT_BET_CENTS = Math.round(Number(process.env.DEFAULT_BET ?? (PLAY ? 100 : 5)) * 100);
 
 const HELP = `Group Markets · ${PLAY ? "play money, 1,000 coins each to start" : "real money, settled between you"}
 
 !new <question>      open a market (odds from chat history + Kalshi)
 !yes 1 ${HINT} · !no 1 ${HINT} bet ${usd(HINT * 100)} on #1${PLAY ? "" : ` (max ${usd(MAX_BET_CENTS)})`}
-!yes ${HINT}${PLAY ? "             " : "              "} bet on the newest market
-👍 / 👎 a market     bet ${usd(TAPBACK_CENTS)} YES / NO
+!yes ${HINT}${PLAY ? "             " : "              "} bet on the newest market (!yes alone: ${usd(DEFAULT_BET_CENTS)})
 !closes 1 2h         stop betting in 2 hours (or 30m, 3d, fri 8pm)
 !m 1 · !markets      charts
 !why 1               case behind the opening odds
-!resolve 1 yes|no    creator settles
-!close 1 · !cancel 1
+!resolve 1 yes|no    settle it (creator; also !close 1 yes)
+!close 1             lock betting, see who wins either way
+!cancel 1            void every bet
 
 ${
   PLAY
@@ -90,28 +93,20 @@ ${
     : "!owe                 who owes who\n!paid 3              you sent IOU 3\n!got 3 · !nope 3     confirm or deny\n!forgive 3\n!venmo you · !cashapp you"
 }
 
-!lb · !name Vish
+!lb · !name Vish · !profile Nishant
 !kalshi <q> · !poly <q> · !mirror kalshi:<TICKER>`;
 
 const DM_COMMANDS = new Set(["help", "owe", "debts", "paid", "got", "nope", "forgive", "venmo", "cashapp"]);
 
-const x = (v: number | null) => (v == null ? "—" : `${v.toFixed(v < 10 ? 1 : 0)}x`);
-
-export const oddsLine = (m: Market) => {
-  const p = pools(m.id);
-  const pay = payouts(m.id);
-  const side = (name: string, v: number | null) => (v == null ? `${name} wins the whole pot` : `${name} pays ${x(v)}`);
-  const money = p.total ? ` · ${usd(p.total)} pot · ${side("YES", pay.yes)}, ${side("NO", pay.no)}` : " · no bets yet";
-  return `YES ${pct(impliedYes(m))}${money}`;
-};
 
 /** "Opening odds 45%. <summary>" plus the points for each side, if Claude gave them. */
-function oddsCase(m: Market): string | null {
+function oddsCase(m: Market, withNumber = true): string | null {
   if (m.prior == null) return null;
-  const lines = [`Opening odds ${pct(m.prior)}.${m.prior_why ? ` ${m.prior_why}` : ""}`];
+  const head = withNumber ? `Opening odds ${pct(m.prior)}.${m.prior_why ? ` ${m.prior_why}` : ""}` : (m.prior_why ?? "");
+  const lines = head ? [head] : [];
   const c = m.prior_case ? (JSON.parse(m.prior_case) as { yes: string[]; no: string[] }) : null;
-  if (c?.yes.length) lines.push("", "For YES:", ...c.yes.map((p) => `+ ${p}`));
-  if (c?.no.length) lines.push("", "For NO:", ...c.no.map((p) => `- ${p}`));
+  if (c?.yes.length) lines.push("", "For YES", ...c.yes.map((p) => `+ ${p}`));
+  if (c?.no.length) lines.push("", "For NO", ...c.no.map((p) => `- ${p}`));
   return lines.join("\n");
 }
 
@@ -119,8 +114,19 @@ function oddsCase(m: Market): string | null {
  * Set a new market's opening odds: an identical Kalshi market wins (and the
  * market then settles with it); otherwise Claude reads the chat history.
  */
-async function openWithOdds(m: Market): Promise<string> {
+async function openWithOdds(m: Market): Promise<{ note: string | null } | { rejected: string }> {
   const est = await estimate(m.space_id, m.question);
+  // SAFE_MARKETS=off allows anything. Otherwise questions that aren't yes/no,
+  // or that bet on someone's identity or sex life, don't open.
+  if (est && process.env.SAFE_MARKETS !== "off") {
+    if (est.off_limits) {
+      return { rejected: `Not opening that one. Roasts are fine, but no bets on someone's religion, race, sexuality or sex life.` };
+    }
+    if (!est.yes_no) {
+      const fix = est.rewrite ? `\nTry: !new ${est.rewrite.replace(/\?*$/, "?")}` : "";
+      return { rejected: `That's not a yes/no question, so there's no way to settle it.${fix}` };
+    }
+  }
   // Claude already judged whether this is a real-world event; only then is a
   // Kalshi twin possible, so friend-group markets skip the search entirely.
   const lookForTwin = !est || est.public_event;
@@ -128,30 +134,36 @@ async function openWithOdds(m: Market): Promise<string> {
   if (twin?.yesPrice != null) {
     setExternal(m, twin.ref);
     m.external = twin.ref;
-    setPrior(m, twin.yesPrice, `Kalshi has it at ${Math.round(twin.yesPrice * 100)}%.`);
+    setPrior(m, twin.yesPrice, `Kalshi has it at ${pct(twin.yesPrice)}: ${twin.title}. Settles when Kalshi does.`);
     recordExtPrice(m.id, twin.yesPrice);
     setExtPosted(m, twin.yesPrice);
-    return `Mirroring Kalshi: ${twin.title} (YES ${pct(twin.yesPrice)}). Settles when Kalshi does.`;
+    return { note: null };
   }
   if (est) {
     setPrior(m, est.probability, est.why, { yes: est.for_yes, no: est.for_no });
-    return oddsCase(m)!;
+    return { note: null };
   }
   setPrior(m, 0.5, null);
-  return oracleEnabled ? "Opening odds 50%." : "Opening at 50% (add ANTHROPIC_API_KEY for odds from the chat)";
+  return { note: oracleEnabled ? null : "Opening at 50% (add ANTHROPIC_API_KEY for odds from the chat)" };
 }
 
 const say = (text: string, extra: Omit<Reply, "text"> = {}): Reply => ({ text, ...extra });
 
-function requireMarket(spaceId: string, raw: string | undefined) {
-  const id = Number(raw?.replace("#", ""));
+
+/** `example` is the command with the id left out, e.g. "!close", to show the right usage. */
+function requireMarket(spaceId: string, raw: string | undefined, example = "!m") {
+  if (!raw) {
+    const newest = latestOpenMarket(spaceId);
+    throw new BetError(newest ? `Which market? e.g. ${example} ${newest.id}` : "No open markets. Start one with !new <question>");
+  }
+  const id = Number(raw.replace("#", ""));
   const m = Number.isInteger(id) ? getMarket(spaceId, id) : undefined;
-  if (!m) throw new BetError(`No market ${raw ? `#${raw.replace("#", "")} ` : ""}in this chat. See !markets`);
+  if (!m) throw new BetError(`No market #${raw.replace("#", "")} in this chat. See !markets`);
   return m;
 }
 
 function requireCreator(m: Market, userId: string) {
-  if (m.creator !== userId) throw new BetError(`Only ${displayName(m.space_id, m.creator)} can do that (market creator).`);
+  if (m.creator !== userId) throw new BetError(`Only ${displayName(m.space_id, m.creator)} can do that on #${m.id} (they opened it).`);
 }
 
 /** Chart rendering is a nice-to-have; a failure never blocks the text reply. */
@@ -166,16 +178,12 @@ function chart(fn: () => Buffer): Buffer | undefined {
 
 export function settlementReply(m: Market, outcome: Side, r: ReturnType<typeof resolveMarket>, prefix = ""): Reply {
   const settled = { ...m, status: "resolved" as const, outcome };
-  const head = `${prefix}#${m.id} resolved ${outcome.toUpperCase()}`;
-  if (r.staked.size === 0) return say(`${head}. No bets were placed.`);
-  if (r.washed) return say(`${head}. Nobody took ${outcome.toUpperCase()}, so it's a wash. Nothing is owed.`);
-  if (PLAY) {
-    const rows = [...r.nets].sort((a, b) => b[1] - a[1]).map(([u, n]) => `${displayName(m.space_id, u)} ${n >= 0 ? "+" : ""}${usd(n)}`);
-    return say(`${head}\n${rows.join("\n")}`);
-  }
-  if (!r.debts.length) return say(`${head}. Everyone broke even.`);
-  const lines = r.debts.map((d) => `${displayName(m.space_id, d.debtor)} → ${displayName(m.space_id, d.creditor)} ${usd(d.amount)}`);
-  return say(`${head}\n${lines.join("\n")}\nPayment instructions sent by DM.`, {
+  // Play money: coins already moved, but show the same "who paid who" a real-money settle would.
+  const transfers = PLAY ? minimalTransfers(r.nets) : r.debts;
+  const balances = PLAY ? new Map([...r.staked.keys()].map((u) => [u, balance(m.space_id, u)])) : undefined;
+  const text = resolvedCard(m, outcome, r, transfers, prefix, balances);
+  if (PLAY || !r.debts.length) return say(text);
+  return say(text, {
     image: chart(() => settleCard(settled, r.debts)),
     dms: settlementDms(settled, r.debts),
   });
@@ -200,6 +208,30 @@ function pickDebts(me: string, raw: string | undefined, role: "debtor" | "credit
   const ds = openDebtsFor(me).filter((d) => d[role] === me && d.status === status);
   if (!ds.length) throw new BetError("Nothing to update. See !owe");
   return ds;
+}
+
+const outcomeOf = (a: string): Side | null => {
+  const w = a.toLowerCase();
+  return w === "yes" || w === "y" ? "yes" : w === "no" || w === "n" ? "no" : null;
+};
+
+/**
+ * `!resolve 52 yes`, in any order. With no id, the newest market this person
+ * opened; with no outcome, ask how it went.
+ */
+function resolveCommand(spaceId: string, userId: string, args: string[]): Reply {
+  const outcome = args.map(outcomeOf).find(Boolean) ?? null;
+  const idArg = args.find((a) => /^#?\d+$/.test(a));
+  const mine = unresolvedBy(spaceId, userId);
+  if (!idArg && !mine.length) return say("You don't have any markets to resolve. Only whoever opened a market can resolve it.");
+  if (!idArg && !outcome) {
+    return say(`Which one, and how did it go?\n${mine.map((m) => `!resolve ${m.id} yes · !resolve ${m.id} no  (${m.question})`).join("\n")}`);
+  }
+  const m = idArg ? requireMarket(spaceId, idArg, "!resolve") : mine[0]!;
+  if (!outcome) return say(`How did #${m.id} go? !resolve ${m.id} yes or !resolve ${m.id} no`);
+  requireCreator(m, userId);
+  if (m.external) throw new BetError(`#${m.id} follows Kalshi and settles automatically.`);
+  return settlementReply(m, outcome, resolveMarket(m, outcome));
 }
 
 export async function handleCommand({ spaceId, userId, text, isDm = false, notify }: Ctx): Promise<Reply | null> {
@@ -239,64 +271,83 @@ export async function handleCommand({ spaceId, userId, text, isDm = false, notif
         if (!question.endsWith("?")) question += "?";
         const m = createMarket(spaceId, userId, question, external);
         if (closesAt) setCloseTime(m, closesAt.getTime());
-        if (oracleEnabled) await notify?.(`Reading chat history to set odds for #${m.id}…`).catch(() => {});
+        if (oracleEnabled) await notify?.(`⏳ Setting odds for #${m.id}…`).catch(() => {});
         const opening = await openWithOdds(m);
-        const closes = m.closes_at ? `\nBetting closes ${describeWhen(m.closes_at)}.` : "";
-        return say(`#${m.id} ${m.question}\n${opening}${closes}\n\n!yes ${m.id} ${HINT} · !no ${m.id} ${HINT} · or 👍 / 👎 this`, {
-          marketId: m.id,
+        if ("rejected" in opening) {
+          cancelMarket(m);
+          suggestions.set(spaceId, { question: opening.rejected.split("!new ")[1] ?? "" });
+          if (!suggestions.get(spaceId)!.question) suggestions.delete(spaceId);
+          return say(opening.rejected);
+        }
+        const reasons = m.prior_case ? (JSON.parse(m.prior_case) as { yes: string[]; no: string[] }) : null;
+        const why = [m.prior_why, opening.note].filter(Boolean).join("\n") || null;
+        return say(newCard(m, displayName(spaceId, userId), why, reasons), {
           image: chart(() => marketCard(m)),
         });
       }
 
       case "yes":
       case "no": {
-        // "!yes 5" means the newest open market.
+        // "!yes 5" means 5 on the newest open market; "!yes" alone, the default bet on it.
+        const side: Side = cmd;
+        const newest = latestOpenMarket(spaceId);
         const [idRaw, amtRaw] = args.length === 1 ? [undefined, args[0]] : args;
-        const m = idRaw ? requireMarket(spaceId, idRaw) : latestOpenMarket(spaceId);
+        // "!yes 25" while #25 is one of the latest open markets (not the newest): market or amount? Ask.
+        if (args.length === 1 && /^#?\d+$/.test(args[0]!) && newest) {
+          const other = listMarkets(spaceId, ["open"]).slice(0, 5).find((m) => m.id === Number(args[0]!.replace("#", "")));
+          if (other && other.id !== newest.id) {
+            const n = args[0]!.replace("#", "");
+            return say(`#${n} or ${usd(Number(n) * 100)}?\n!${side} ${n} ${HINT} → ${usd(HINT * 100)} on #${n}\n!${side} ${newest.id} ${n} → ${usd(Number(n) * 100)} on #${newest.id} (newest)`);
+          }
+        }
+        const m = idRaw ? requireMarket(spaceId, idRaw, `!${side}`) : newest;
         if (!m) throw new BetError("No open markets. Start one with !new <question>");
-        const cents = PLAY && amtRaw?.toLowerCase() === "all" ? balance(spaceId, userId) : parseMoney(amtRaw);
-        placeBet(spaceId, userId, m.id, cmd, cents);
-        return say(`Bet placed: ${displayName(spaceId, userId)} · ${usd(cents)} ${cmd.toUpperCase()} on #${m.id}\n${oddsLine(m)}`, { betOn: m, marketId: m.id });
+        const cents = args.length === 0 ? DEFAULT_BET_CENTS : PLAY && amtRaw?.toLowerCase() === "all" ? balance(spaceId, userId) : parseMoney(amtRaw);
+        if (!Number.isFinite(cents) || cents <= 0) return say(`How much? e.g. !${side} ${m.id} ${HINT}`);
+
+        const before = { ...pools(m.id), odds: impliedYes(m) };
+        const bankroll = PLAY ? balance(spaceId, userId) : undefined;
+        placeBet(spaceId, userId, m.id, side, cents);
+        const name = displayName(spaceId, userId);
+        const reaction = betReaction({ market: m, name, side, cents, before, after: { odds: impliedYes(m) }, bankroll });
+        return say(betCard(m, name, side, cents, reaction), { betOn: m });
       }
 
       case "markets":
       case "ls": {
         const ms = listMarkets(spaceId);
         if (!ms.length) return say("No open markets. Start one with !new <question>");
-        return say(ms.map((m) => `#${m.id}${m.status === "closed" ? " (locked)" : ""} ${m.question}\n${oddsLine(m)}`).join("\n\n"), {
+        return say(boardText(ms), {
           image: chart(() => boardCard("Open markets", ms)),
         });
       }
 
       case "why": {
-        const m = args[0] ? requireMarket(spaceId, args[0]) : latestOpenMarket(spaceId);
+        const m = args[0] ? requireMarket(spaceId, args[0], "!why") : latestOpenMarket(spaceId);
         if (!m) throw new BetError("No open markets. Start one with !new <question>");
-        return say(`#${m.id} ${m.question}\n${oddsCase(m) ?? "No opening odds recorded."}\nNow: ${oddsLine(m)}`);
+        return say([`🤔 Why #${m.id} opened at ${pct(m.prior)}`, RULE, oddsCase(m, false) || "No opening odds recorded.", "", showCard(m, "Now")].join("\n"));
       }
 
       case "m":
       case "chart":
       case "info": {
-        const m = requireMarket(spaceId, args[0]);
+        const m = requireMarket(spaceId, args[0], "!m");
         const ext = m.external ? await fetchRef(m.external).catch(() => null) : null;
         const extName = m.external ? parseRef(m.external)?.source.name : undefined;
-        const lines = [`#${m.id} ${m.question}`, oddsLine(m)];
-        if (m.status === "open" && m.closes_at) lines.push(`Closes ${describeWhen(m.closes_at)}.`);
-        if (ext && extName) lines.push(`${extName}: YES ${pct(ext.yesPrice)} · ${ext.url}`);
-        return say(lines.join("\n"), {
-          marketId: m.id,
+        const header = `📊 Market #${m.id}${ext && extName ? ` · ${extName} says ${pct(ext.yesPrice)}` : ""}`;
+        return say(showCard(m, header), {
           image: chart(() => marketCard(m, ext && extName ? { name: extName, yes: ext.yesPrice } : undefined)),
         });
       }
 
       case "closes": {
-        const m = requireMarket(spaceId, args[0]);
+        const m = requireMarket(spaceId, args[0], "!closes");
         requireCreator(m, userId);
         if (m.status !== "open") throw new BetError(`#${m.id} is already ${m.status}.`);
         const at = parseWhen(args.slice(1).join(" "));
         if (!at) return say(`Usage: !closes ${m.id} 2h (or 30m, 8pm, tomorrow 9am, fri 8pm)`);
         setCloseTime(m, at.getTime());
-        return say(`#${m.id} closes ${describeWhen(at.getTime())}. Last call ${process.env.LAST_CALL_MINUTES ?? 15} min before.`, { marketId: m.id });
+        return say(`#${m.id} closes ${describeWhen(at.getTime())}. Last call ${process.env.LAST_CALL_MINUTES ?? 15} min before.`);
       }
 
       case "demo": {
@@ -311,34 +362,32 @@ export async function handleCommand({ spaceId, userId, text, isDm = false, notif
         setExtPosted(m, pick.yesPrice);
         setCloseTime(m, pick.closesAt);
         return say(
-          `#${m.id} ${m.question}\nKalshi: YES ${pct(pick.yesPrice)}. Betting closes ${describeWhen(pick.closesAt)}, then it settles on its own.\n\n!yes ${m.id} ${HINT} · !no ${m.id} ${HINT} · or 👍 / 👎 this`,
-          { marketId: m.id, image: chart(() => marketCard(m, { name: "Kalshi", yes: pick.yesPrice })) },
+          newCard(m, displayName(spaceId, userId), `Kalshi has it at ${pct(pick.yesPrice)}. Settles on its own after betting closes.`, null),
+          { image: chart(() => marketCard(m, { name: "Kalshi", yes: pick.yesPrice })) },
         );
       }
 
       case "close": {
-        const m = requireMarket(spaceId, args[0]);
+        // "!close 52 yes" / "!close yes" means settle it, not just lock it.
+        if (args.some((a) => outcomeOf(a))) return resolveCommand(spaceId, userId, args);
+        const m = requireMarket(spaceId, args[0], "!close");
         requireCreator(m, userId);
         closeMarket(m);
-        return say(`#${m.id} locked. No more bets.`);
+        const locked = { ...m, status: "closed" as const };
+        return say(lockedCard(locked, projectedNets(m.id, "yes"), projectedNets(m.id, "no")));
       }
 
       case "cancel": {
-        const m = requireMarket(spaceId, args[0]);
+        const m = requireMarket(spaceId, args[0], "!cancel");
         requireCreator(m, userId);
         if (m.status === "resolved" || m.status === "cancelled") throw new BetError(`#${m.id} is already ${m.status}.`);
         cancelMarket(m);
         return say(`#${m.id} cancelled. All bets void.`);
       }
 
-      case "resolve": {
-        const m = requireMarket(spaceId, args[0]);
-        const outcome = args[1]?.toLowerCase();
-        if (outcome !== "yes" && outcome !== "no") return say(`Usage: !resolve ${m.id} yes|no`);
-        requireCreator(m, userId);
-        if (m.external) throw new BetError(`#${m.id} follows Kalshi and settles automatically.`);
-        return settlementReply(m, outcome, resolveMarket(m, outcome));
-      }
+      case "resolve":
+      case "settle":
+        return resolveCommand(spaceId, userId, args);
 
       case "bal":
       case "balance":
@@ -420,6 +469,26 @@ export async function handleCommand({ spaceId, userId, text, isDm = false, notif
         return say(rows.map((r, i) => `${i + 1}. ${displayName(spaceId, r.user_id)} ${sign(r.net)}${usd(r.net)}`).join("\n"));
       }
 
+      case "profile":
+      case "who": {
+        // The cached personality profile. The private "never joke about" list stays private.
+        // Only this chat's profiles: someone's profile from another chat is never shown here.
+        if (isDm) return say("Profiles only work in a group chat.");
+        const p = rest ? findProfile(spaceId, rest) : (findProfile(spaceId, displayName(spaceId, userId)) ?? findProfile(spaceId, "me"));
+        if (!p) return say(rest ? `No profile for "${rest}" in this chat yet. Profiles are built by npm run scan.` : "Usage: !profile Nishant");
+        const d = JSON.parse(p.data) as PersonProfile;
+        const lines = [
+          `${p.name}: ${d.vibe}`,
+          `Humor: ${d.humor}`,
+          `Reliability: ${d.reliability}`,
+          `Money: ${d.money}`,
+          `Into: ${d.interests.join(", ")}`,
+          ...(d.catchphrases.length ? [`Says: ${d.catchphrases.map((c) => `"${c}"`).join(", ")}`] : []),
+          `Fair game: ${d.roastable.join("; ")}`,
+        ];
+        return say(lines.join("\n"));
+      }
+
       case "name": {
         const name = rest.slice(0, 24);
         if (!name) return say("Usage: !name Vish");
@@ -448,14 +517,13 @@ export async function handleCommand({ spaceId, userId, text, isDm = false, notif
           recordExtPrice(m.id, ext.yesPrice);
           setExtPosted(m, ext.yesPrice);
         }
-        return say(`#${m.id} ${m.question}\n${name}: YES ${pct(ext.yesPrice)}. Settles automatically.\n!yes ${m.id} ${HINT} · !no ${m.id} ${HINT} · or 👍 / 👎 this`, {
-          marketId: m.id,
+        return say(newCard(m, displayName(spaceId, userId), `${name} has it at ${pct(ext.yesPrice)}. Settles automatically.`, null), {
           image: chart(() => marketCard(m, { name, yes: ext.yesPrice })),
         });
       }
 
       case "link": {
-        const m = requireMarket(spaceId, args[0]);
+        const m = requireMarket(spaceId, args[0], "!link");
         requireCreator(m, userId);
         const ext = args[1] ? await fetchRef(args[1]) : null;
         if (!ext) return say(`Usage: !link ${m.id} kalshi:<TICKER>`);

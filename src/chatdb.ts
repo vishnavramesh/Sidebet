@@ -56,6 +56,13 @@ export async function readChatHistory(chatId: string, onPage?: (n: number) => vo
   return out.sort((a, b) => a.ts - b.ts);
 }
 
+/** Group chats on this Mac whose name matches (case-insensitive), so a scan can take "Walnut" instead of an id. */
+export function findChatsByName(name: string): { guid: string; name: string }[] {
+  return chatDb()
+    .prepare("SELECT guid, display_name AS name FROM chat WHERE guid LIKE '%;+;%' AND lower(display_name) = lower(?)")
+    .all(name.trim()) as { guid: string; name: string }[];
+}
+
 /** A group chat's display name, if it has one. */
 export function chatName(chatId: string): string | null {
   const row = chatDb().prepare("SELECT display_name AS n FROM chat WHERE guid = ?").get(chatId) as { n: string | null } | undefined;

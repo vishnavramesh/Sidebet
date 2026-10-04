@@ -40,14 +40,14 @@ npm run scan -- "<chat id>"   # read a group's history first, so opening odds kn
 
 ## Odds and live charts
 
-- **Opening odds.** Before going live in a group, run `npm run scan -- "<chat id>"`. It copies the chat's history (with names from Contacts) into the bot's database and, with an API key, has Claude write a short summary of the group. When a market opens, Claude reads that history and sets a starting probability and posts the case for it: a one-line summary plus up to three points from the chat for YES and for NO (`!why <id>` shows it again). The guess counts as `PRIOR_WEIGHT` dollars of imaginary money, so real bets move the odds from there. Payouts only ever use real money.
+- **Opening odds.** Before going live in a group, run `npm run scan -- "<chat id>"`. It copies the chat's history (with names from Contacts) into the bot's database and, with an API key, has Claude read all of it once and write a dossier: each person's track record with dated quotes, money owed, plan statuses and running jokes. Markets read that dossier (~11K tokens) instead of the raw chat (~115K), so each market costs about 2¢ and restarts cost nothing. Re-run the scan every week or so to fold in new messages. Each chat is isolated: a market only reads its own chat's dossier and profiles, never another chat's. The scan also builds a cached personality profile for everyone with 10+ messages in that chat, one per person per chat, so the same person in two group chats has two profiles built only from what each chat says (vibe, humor, reliability, money habits, catchphrases, fair-game roasts, and a private never-joke-about list), rebuilt only after they've sent 100 more messages; `npm run scan -- --profiles` refreshes just those. When a market opens, Claude reads that history and sets a starting probability and posts the case for it: a one-line summary plus up to three points from the chat for YES and for NO (`!why <id>` shows it again). The guess counts as `PRIOR_WEIGHT` dollars of imaginary money, so real bets move the odds from there. Payouts only ever use real money.
 - **Kalshi first.** Every `!new` checks Kalshi for the same question. A match becomes a mirror: it opens at Kalshi's price, its chart shows Kalshi's line, and it settles when Kalshi does.
 - **Live updates.** iMessage can't embed a live widget, so the bot re-posts the chart instead: 15 seconds after a burst of bets, and whenever a mirrored Kalshi market moves `KALSHI_MOVE_POINTS` or more.
 - **Payout odds.** Replies and charts show what $1 returns on each side at the current pot ("YES pays 1.4x").
 
 ## How it sounds
 
-Replies are short and neutral, like a bot. Every bot message is set in Unicode small caps ʟɪᴋᴇ ᴛʜɪꜱ (`BOT_FONT`) so it's obvious which messages are the bot, since in local mode it sends from a real person's account and can't use iMessage effects. Links stay plain, and commands typed or pasted in any font still work.
+Replies are short and neutral, like a bot. Every bot message is set in Unicode sans-serif bold 𝗹𝗶𝗸𝗲 𝘁𝗵𝗶𝘀, the closest match to iMessage's own font (`BOT_FONT`) so it's obvious which messages are the bot, since in local mode it sends from a real person's account and can't use iMessage effects. Links stay plain, and commands typed or pasted in any font still work.
 
 ## Commands
 
@@ -55,7 +55,7 @@ Replies are short and neutral, like a bot. Every bot message is set in Unicode s
 |---|---|
 | `!new <question>` | open a yes/no market. If Kalshi has the same question it mirrors it (and settles with it); otherwise Claude sets opening odds from the scanned chat history. `!new` alone adopts the bot's last suggestion |
 | `!yes 5` | bet on the newest market |
-| 👍 / 👎 on a market message | bet `TAPBACK_AMOUNT` YES / NO (local mode) |
+| `!yes` / `!no` alone | bet `DEFAULT_BET` on the newest market |
 | `!closes <id> 2h` | stop betting at a time (`30m`, `8pm`, `tomorrow 9am`, `fri 8pm`); also `!new <question> \| 2h`. Last call 15 min before, then reminders to resolve |
 | `!bal`, `!daily` | play-money balance, +100 coins a day |
 | `!demo [eth]` | with `DEMO=on`: mirror the hourly Kalshi BTC (or ETH) market nearest 50/50, so it settles live |
@@ -65,6 +65,7 @@ Replies are short and neutral, like a bot. Every bot message is set in Unicode s
 | `!markets` | chart of all open markets |
 | `!resolve <id> yes\|no` | creator settles a manual market |
 | `!close <id>`, `!cancel <id>` | stop betting / void every bet |
+| `!profile <name>` | that person's cached personality profile (built by `npm run scan`) |
 | `!lb`, `!name <nick>` | all-time winnings, display name |
 | `!kalshi <q>`, `!poly <q>` | search real markets |
 | `!mirror kalshi:<TICKER>` / `poly:<id>` | open a group market that tracks and auto-settles with the real one |

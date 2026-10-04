@@ -12,7 +12,8 @@
     "smoke": "DB_PATH=:memory: MONEY_MODE=real tsx scripts/smoke.ts && DB_PATH=:memory: MONEY_MODE=play tsx scripts/smoke-play.ts",
     "discover": "tsx --env-file-if-exists=.env src/index.ts --discover",
     "postinstall": "patch-package",
-    "scan": "tsx --env-file-if-exists=.env scripts/scan.ts"
+    "scan": "tsx --env-file-if-exists=.env scripts/scan.ts",
+    "remap": "tsx --env-file-if-exists=.env scripts/remap-chat.ts"
   },
   "keywords": [],
   "author": "",
